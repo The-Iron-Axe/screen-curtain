@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKDeploymentManagerInitialize>false</WindowsAppSDKDeploymentManagerInitialize>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ScreenCurtain.ico</ApplicationIcon>
+    <AssemblyName>ScreenCurtain.WinUI</AssemblyName>
+    <RootNamespace>ScreenCurtain</RootNamespace>
+    <Version>1.0.0</Version>
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Launcher.template.cs" />
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <!-- Reference the UI component rather than bundling unused AI, ML, and widget runtimes. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7627" />
+    <Content Include="Assets\ScreenCurtain.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="PublishCompiledXamlResources" AfterTargets="Publish">
+    <ItemGroup>
+      <CompiledXamlResources Include="$(TargetDir)App.xbf;$(TargetDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CompiledXamlResources)" DestinationFolder="$(PublishDir)" />
+  </Target>
+  <!-- The WindowsForms runtime pack also contains WPF. Use the SDK's WPF-only profile list
+       to exclude that unused framework from both dependency metadata and copied files. -->
+  <Target Name="ExcludeUnusedWpfRuntime" AfterTargets="ResolveRuntimePackAssets" Condition="'$(UseWPF)' != 'true'">
+    <ItemGroup>
+      <_DesktopReferencePack Include="@(ResolvedTargetingPack)" Condition="'%(ResolvedTargetingPack.Identity)' == 'Microsoft.WindowsDesktop.App.WindowsForms'" />
+    </ItemGroup>
+    <XmlPeek XmlInputPath="%(_DesktopReferencePack.PackageDirectory)\data\FrameworkList.xml" Query="/FileList/File[@Type='Managed' and @Profile='WPF']/@AssemblyName">
+      <Output TaskParameter="Result" ItemName="_UnusedWpfAssembly" />
+    </XmlPeek>
+    <ItemGroup>
+      <_UnusedWpfFile Include="@(_UnusedWpfAssembly->'%(Identity).dll');@(_UnusedWpfAssembly->'%(Identity).resources.dll')" />
+      <_UnusedWpfFile Include="DirectWriteForwarder.dll;D3DCompiler_47_cor3.dll;PenImc_cor3.dll;PresentationNative_cor3.dll;wpfgfx_cor3.dll" />
+      <RuntimePackAsset Remove="@(_UnusedWpfFile)" MatchOnMetadata="Filename;Extension" MatchOnMetadataOptions="CaseInsensitive" />
+      <ReferenceCopyLocalPaths Remove="@(_UnusedWpfFile)" MatchOnMetadata="Filename;Extension" MatchOnMetadataOptions="CaseInsensitive" />
+      <_UnusedWpfAsset Include="@(RuntimePackAsset)" Condition="'%(RuntimePackAsset.NuGetPackageId)' == 'Microsoft.WindowsDesktop.App.Runtime.win-x64' and $([System.String]::Copy('%(RuntimePackAsset.Filename)').StartsWith('PresentationFramework-'))" />
+      <RuntimePackAsset Remove="@(_UnusedWpfAsset)" />
+      <ReferenceCopyLocalPaths Remove="@(_UnusedWpfAsset)" />
+    </ItemGroup>
+  </Target>
+</Project>

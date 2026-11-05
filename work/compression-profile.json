@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "archive_format": "xz-lzma2",
+  "xz_preset": 9,
+  "xz_extreme": false,
+  "xz_x86_filter": true,
+  "xz_dictionary_mib": 128,
+  "group_files_by_extension": true,
+  "excluded_extensions": [".pdb"],
+  "cache_compression": "LZX",
+  "decoder_version": "XZ Utils 5.6.4",
+  "decoder_directory": "CompressionVendor/xz-5.6.4"
+}

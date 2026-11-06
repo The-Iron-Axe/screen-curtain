@@ -38,6 +38,33 @@ namespace ScreenCurtain
             var screen = Forms.SystemInformation.VirtualScreen;
             var origin = new Point(screen.Right + 4000, screen.Bottom + 4000);
             var rectangle = Geometry.RectangleZone(new Point(0, 0), new Point(199, 159), origin);
+            using (var wheelHook = new TemporarySpotlightWheel(delta => { }))
+                check(wheelHook.Available, "Temporary spotlight can install the mouse-wheel hook and release it after use");
+            using (var spotlight = new SpotlightForm(new Rectangle(origin, new Size(400, 300)), rectangle))
+            {
+                spotlight.Show();
+                IntPtr region = Native.CreateRectRgn(0, 0, 0, 0);
+                try
+                {
+                    check(Native.GetWindowRgn(spotlight.Handle, region) != 0 && !Native.PtInRegion(region, 50, 50) && Native.PtInRegion(region, 250, 200),
+                        "Spotlight excludes its selected opening while covering the rest of the screen");
+                    check((Native.GetStyle(spotlight.Handle) & Native.WS_EX_TRANSPARENT) != 0 &&
+                        Native.GetLayeredWindowAttributes(spotlight.Handle, out uint key, out byte alpha, out uint flags) && alpha > 0 && alpha < 255,
+                        "Spotlight is translucent and permits mouse interaction through the dimmed area");
+                    var shifted = MainWindow.FollowingOpening(new Size(80, 60), new Point(origin.X + 250, origin.Y + 180));
+                    spotlight.UpdateOpening(shifted);
+                    check(Native.GetWindowRgn(spotlight.Handle, region) != 0 && Native.PtInRegion(region, 50, 50) && !Native.PtInRegion(region, 250, 180) &&
+                        shifted.Bounds.Size == new Size(80, 60), "Following spotlight moves its opening to the cursor while retaining dimensions");
+                    var negative = MainWindow.FollowingOpening(new Size(81, 61), new Point(-500, -300));
+                    check(negative.Bounds == new Rectangle(-540, -330, 81, 61), "Following spotlight centers correctly on negative-coordinate monitors");
+                    var circle = MainWindow.FollowingOpening(new Size(100, 100), new Point(origin.X + 250, origin.Y + 180), true);
+                    spotlight.UpdateOpening(circle);
+                    check(Native.GetWindowRgn(spotlight.Handle, region) != 0 && !Native.PtInRegion(region, 250, 180) &&
+                        Native.PtInRegion(region, 201, 131) && circle.Curve == CurveShape.Ellipse,
+                        "Circular following spotlight leaves its center clear while covering its bounding-box corners");
+                }
+                finally { Native.DeleteObject(region); }
+            }
             var polygon = new Zone { Polygon = true, ColorRgb = 0x176be8, OpacityPercent = 50, BorderEnabled = true, BorderWidth = 4, BorderColorRgb = 0xeeeeee, BorderStyle = 1,
                 Points = new List<Point> { origin, new Point(origin.X + 179, origin.Y), new Point(origin.X + 90, origin.Y + 139) } };
             using (var initial = new MaskForm(rectangle, true, () => { }, () => { }, () => { }))

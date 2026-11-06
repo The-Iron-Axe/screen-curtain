@@ -56,6 +56,27 @@ namespace ScreenCurtain
         private readonly Forms.NotifyIcon tray = new Forms.NotifyIcon();
         private readonly Forms.ContextMenuStrip trayMenu = new Forms.ContextMenuStrip();
         private readonly Forms.ToolStripMenuItem trayToggle = new Forms.ToolStripMenuItem();
+        private readonly Forms.ToolStripMenuItem traySpotlight = new Forms.ToolStripMenuItem("开启聚光灯");
+        private readonly MenuFlyoutItem spotlightMenu = new MenuFlyoutItem { Text = "开启聚光灯" };
+        private readonly MenuFlyoutItem followSpotlightMenu = new MenuFlyoutItem { Text = "开启鼠标跟随聚光灯" };
+        private readonly MenuFlyoutItem circleSpotlightMenu = new MenuFlyoutItem { Text = "开启圆形固定聚光灯" };
+        private readonly MenuFlyoutItem circleFollowSpotlightMenu = new MenuFlyoutItem { Text = "开启圆形跟随聚光灯" };
+        private readonly Forms.ToolStripMenuItem trayCircleSpotlight = new Forms.ToolStripMenuItem("开启圆形固定聚光灯");
+        private readonly Forms.ToolStripMenuItem trayCircleFollowSpotlight = new Forms.ToolStripMenuItem("开启圆形跟随聚光灯");
+        private readonly Forms.ToolStripMenuItem trayFollowSpotlight = new Forms.ToolStripMenuItem("开启鼠标跟随聚光灯");
+        private readonly List<SpotlightForm> spotlights = new List<SpotlightForm>();
+        private readonly DispatcherQueueTimer spotlightTimer;
+        private readonly DispatcherQueueTimer temporarySpotlightTimer;
+        private readonly List<SpotlightForm> temporarySpotlights = new List<SpotlightForm>();
+        private TemporarySpotlightWheel temporaryWheel;
+        private int temporaryDiameter = 300, wheelRemainder;
+        internal int TemporaryDiameter { get { return temporaryDiameter; } }
+        internal int TemporarySpotlightCount { get { return temporarySpotlights.Count; } }
+        private System.Drawing.Point? temporaryCursor;
+        private bool spotlightFollow;
+        private bool spotlightCircle;
+        private System.Drawing.Size spotlightSize;
+        private System.Drawing.Point? spotlightCursor;
         private readonly DispatcherQueueTimer keeper;
         private readonly DispatcherQueueTimer resourceCleanup;
         internal int CardCreationCount { get; private set; }
@@ -115,7 +136,11 @@ namespace ScreenCurtain
                 var entry = new MenuFlyoutItem { Text = item.Item1 };
                 SelectionShape kind = item.Item2; entry.Click += (s, e) => BeginSelection(kind); shapeMenu.Items.Add(entry);
             }
-            more.Flyout = shapeMenu; ToolTipService.SetToolTip(more, "更多形状：椭圆、圆形、三角形、圆角矩形");
+            shapeMenu.Items.Add(new MenuFlyoutSeparator()); spotlightMenu.Click += (s, e) => ToggleSpotlight(); shapeMenu.Items.Add(spotlightMenu);
+            followSpotlightMenu.Click += (s, e) => ToggleSpotlight(true); shapeMenu.Items.Add(followSpotlightMenu);
+            circleSpotlightMenu.Click += (s, e) => ToggleSpotlight(false, true); shapeMenu.Items.Add(circleSpotlightMenu);
+            circleFollowSpotlightMenu.Click += (s, e) => ToggleSpotlight(true, true); shapeMenu.Items.Add(circleFollowSpotlightMenu);
+            more.Flyout = shapeMenu; ToolTipService.SetToolTip(more, "更多形状与聚光灯模式");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, "更多形状");
             Ui.Put(addRow, rectangle, 0, 0); Ui.Put(addRow, polygon, 0, 1); Ui.Put(addRow, more, 0, 2); Ui.Put(body, addRow, 0);
             var actionRow = Ui.Columns(Ui.Star, Ui.Auto, Ui.Auto);
@@ -179,6 +204,10 @@ namespace ScreenCurtain
             trayShapes.DropDownItems.Add("椭圆 / 圆形", null, (s, e) => BeginSelection(SelectionShape.Ellipse));
             trayShapes.DropDownItems.Add("三角形", null, (s, e) => BeginSelection(SelectionShape.Triangle));
             trayShapes.DropDownItems.Add("圆角矩形", null, (s, e) => BeginSelection(SelectionShape.RoundedRectangle)); trayMenu.Items.Add(trayShapes);
+            traySpotlight.Click += (s, e) => ToggleSpotlight(); trayMenu.Items.Add(traySpotlight);
+            trayFollowSpotlight.Click += (s, e) => ToggleSpotlight(true); trayMenu.Items.Add(trayFollowSpotlight);
+            trayCircleSpotlight.Click += (s, e) => ToggleSpotlight(false, true); trayMenu.Items.Add(trayCircleSpotlight);
+            trayCircleFollowSpotlight.Click += (s, e) => ToggleSpotlight(true, true); trayMenu.Items.Add(trayCircleFollowSpotlight);
             trayMenu.Items.Add(new Forms.ToolStripSeparator()); trayMenu.Items.Add("退出", null, (s, e) => RequestExit());
             tray.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath); tray.Text = "屏幕遮罩"; tray.ContextMenuStrip = trayMenu;
             tray.DoubleClick += (s, e) => ShowController(); tray.Visible = !Testing;
@@ -186,7 +215,7 @@ namespace ScreenCurtain
             if (!Testing)
             {
                 LoadSettings();
-                Forms.Keys[] keys = { Forms.Keys.B, Forms.Keys.R, Forms.Keys.P, Forms.Keys.Q };
+                Forms.Keys[] keys = { Forms.Keys.B, Forms.Keys.R, Forms.Keys.P, Forms.Keys.Q, Forms.Keys.Space };
                 var unavailable = new List<string>();
                 for (int i = 0; i < keys.Length; i++)
                     if (Native.RegisterHotKey(Handle, i + 1, 0x4003, (uint)keys[i])) hotkeys.Add(i + 1); else unavailable.Add("Ctrl+Alt+" + keys[i]);
@@ -196,6 +225,10 @@ namespace ScreenCurtain
             RebuildCards(); RefreshMasks();
             keeper = DispatcherQueue.CreateTimer(); keeper.Interval = TimeSpan.FromSeconds(1);
             keeper.Tick += (s, e) => MaintainOverlayOrder();
+            spotlightTimer = DispatcherQueue.CreateTimer(); spotlightTimer.Interval = TimeSpan.FromMilliseconds(33);
+            spotlightTimer.Tick += (s, e) => UpdateFollowingSpotlight();
+            temporarySpotlightTimer = DispatcherQueue.CreateTimer(); temporarySpotlightTimer.Interval = TimeSpan.FromMilliseconds(33);
+            temporarySpotlightTimer.Tick += (s, e) => { if (!TemporarySpotlightWheel.ShortcutHeld()) EndTemporarySpotlight(); else UpdateTemporarySpotlight(); };
             resourceCleanup = DispatcherQueue.CreateTimer(); resourceCleanup.Interval = TimeSpan.FromSeconds(2); resourceCleanup.IsRepeating = false;
             resourceCleanup.Tick += (s, e) => ReleaseIdleResources();
             if (!Testing) { orderWatcher = new WindowOrderWatcher(QueueOverlayOrder); keeper.Start(); }
@@ -230,7 +263,7 @@ namespace ScreenCurtain
             if (msg == Native.WM_HOTKEY)
             {
                 int key = w.ToInt32();
-                DispatcherQueue.TryEnqueue(() => { if (key == 1) ToggleMaster(); else if (key == 2) BeginSelection(false); else if (key == 3) BeginSelection(true); else if (key == 4) RequestExit(); });
+                DispatcherQueue.TryEnqueue(() => { if (key == 1) ToggleMaster(); else if (key == 2) BeginSelection(false); else if (key == 3) BeginSelection(true); else if (key == 4) RequestExit(); else if (key == 5 && TemporarySpotlightWheel.ShortcutHeld()) BeginTemporarySpotlight(); });
                 return IntPtr.Zero;
             }
             if (msg == 0x0024 && l != IntPtr.Zero)
@@ -247,7 +280,7 @@ namespace ScreenCurtain
         private static Expander CreateShortcuts(bool expanded)
         {
             var content = new StackPanel { Spacing = 7 };
-            foreach (string label in new[] { "Ctrl+Alt+B   打开 / 关闭已选遮罩", "Ctrl+Alt+Q   退出并移除遮罩", "Ctrl+Alt+R   矩形框选", "Ctrl+Alt+P   多边形框选" })
+            foreach (string label in new[] { "Ctrl+Alt+B   打开 / 关闭已选遮罩", "Ctrl+Alt+Q   退出并移除遮罩", "Ctrl+Alt+R   矩形框选", "Ctrl+Alt+P   多边形框选", "按住 Ctrl+Alt+空格   临时聚光 · 滚轮调大小" })
                 content.Children.Add(Ui.Text(label, 12, 0x657184));
             return new Expander { Header = "快捷键", Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Bottom,
@@ -347,10 +380,104 @@ namespace ScreenCurtain
         {
             if (closing || selecting || Transfer != null || trayMenu.Visible || Masks.Values.Any(m => m.ContextMenuStrip.Visible)) return false;
             var group = new List<IntPtr>();
+            group.AddRange(temporarySpotlights.Where(s => s.Visible).Select(s => s.Handle));
+            group.AddRange(spotlights.Where(s => s.Visible).Select(s => s.Handle));
             group.AddRange(Zones.AsEnumerable().Reverse().Where(z => Masks[z].Visible).Select(z => Masks[z].Handle));
             return OverlayOrder.Ensure(group, Environment.ProcessId);
         }
         internal void BeginSelection(bool polygon) { BeginSelection(polygon ? SelectionShape.Polygon : SelectionShape.Rectangle); }
+        internal void BeginTemporarySpotlight()
+        {
+            if (closing || selecting || HasSettingsDialog || temporarySpotlights.Count > 0) return;
+            var cursor = Forms.Cursor.Position;
+            var opening = FollowingOpening(new System.Drawing.Size(temporaryDiameter, temporaryDiameter), cursor, true);
+            try
+            {
+                foreach (var screen in Forms.Screen.AllScreens)
+                {
+                    var bounds = screen.Bounds;
+                    if (Testing) bounds.Offset(Forms.SystemInformation.VirtualScreen.Width + 5000, Forms.SystemInformation.VirtualScreen.Height + 5000);
+                    temporarySpotlights.Add(new SpotlightForm(bounds, opening));
+                }
+                if (!Testing) temporaryWheel = new TemporarySpotlightWheel(delta => DispatcherQueue.TryEnqueue(() => ResizeTemporarySpotlight(delta)));
+                if (!Testing && !temporaryWheel.Available) { warning = "临时聚光的滚轮调整不可用。"; }
+                temporaryCursor = cursor; wheelRemainder = 0;
+                RefreshMasks(); if (!Testing) temporarySpotlightTimer.Start();
+            }
+            catch { EndTemporarySpotlight(); throw; }
+        }
+        internal void ResizeTemporarySpotlight(int delta)
+        {
+            if (temporarySpotlights.Count == 0) return;
+            wheelRemainder += delta;
+            int steps = wheelRemainder / 120; wheelRemainder %= 120;
+            if (steps == 0) return;
+            temporaryDiameter = (int)Math.Clamp((long)temporaryDiameter + (long)steps * 30, 80, 2000);
+            temporaryCursor = null; UpdateTemporarySpotlight();
+        }
+        private void UpdateTemporarySpotlight()
+        {
+            if (temporarySpotlights.Count == 0) return;
+            var cursor = Forms.Cursor.Position;
+            if (temporaryCursor.HasValue && temporaryCursor.Value == cursor) return;
+            temporaryCursor = cursor;
+            var opening = FollowingOpening(new System.Drawing.Size(temporaryDiameter, temporaryDiameter), cursor, true);
+            foreach (var spotlight in temporarySpotlights) spotlight.UpdateOpening(opening);
+        }
+        internal void EndTemporarySpotlight()
+        {
+            temporarySpotlightTimer?.Stop(); temporaryWheel?.Dispose(); temporaryWheel = null; temporaryCursor = null;
+            foreach (var spotlight in temporarySpotlights) spotlight.Dispose(); temporarySpotlights.Clear();
+            if (!closing) RefreshMasks();
+        }
+        internal void ToggleSpotlight(bool follow = false, bool circle = false)
+        {
+            if (closing || selecting || HasSettingsDialog) return;
+            if (spotlights.Count > 0 && spotlightFollow == follow && spotlightCircle == circle) { StopSpotlight(); return; }
+            selecting = true; AppWindow.Hide(); RefreshMasks();
+            SynchronizationContext previous = SynchronizationContext.Current;
+            try
+            {
+                using (var picker = new SelectionForm(circle ? SelectionShape.Ellipse : SelectionShape.Rectangle, Forms.SystemInformation.VirtualScreen, circle))
+                {
+                    selection = picker;
+                    if (picker.ShowDialog() == Forms.DialogResult.OK && picker.Result != null && !closing)
+                    {
+                        StopSpotlight(); spotlightFollow = follow; spotlightCircle = circle; spotlightSize = picker.Result.Bounds.Size; spotlightCursor = null;
+                        var opening = follow ? FollowingOpening(spotlightSize, Forms.Cursor.Position, circle) : picker.Result;
+                        foreach (var screen in Forms.Screen.AllScreens) spotlights.Add(new SpotlightForm(screen.Bounds, opening));
+                        if (follow) spotlightTimer.Start();
+                    }
+                }
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous); selection = null; selecting = false;
+                if (!closing) { RefreshMasks(); ShowController(); }
+                ScheduleResourceCleanup();
+            }
+        }
+        internal void StopSpotlight()
+        {
+            spotlightTimer?.Stop(); spotlightFollow = false; spotlightCircle = false; spotlightCursor = null;
+            foreach (var spotlight in spotlights) spotlight.Dispose(); spotlights.Clear();
+            if (!closing) RefreshMasks();
+        }
+        internal static Zone FollowingOpening(System.Drawing.Size size, System.Drawing.Point cursor, bool circle = false)
+        {
+            var origin = new System.Drawing.Point(cursor.X - size.Width / 2, cursor.Y - size.Height / 2);
+            var zone = Geometry.RectangleZone(origin, new System.Drawing.Point(origin.X + size.Width - 1, origin.Y + size.Height - 1), System.Drawing.Point.Empty);
+            if (circle) zone.Curve = CurveShape.Ellipse;
+            return zone;
+        }
+        private void UpdateFollowingSpotlight()
+        {
+            if (!spotlightFollow || selecting || Transfer != null || spotlights.Count == 0) return;
+            var cursor = Forms.Cursor.Position;
+            if (spotlightCursor.HasValue && spotlightCursor.Value == cursor) return;
+            spotlightCursor = cursor; var opening = FollowingOpening(spotlightSize, cursor, spotlightCircle);
+            foreach (var spotlight in spotlights) spotlight.UpdateOpening(opening);
+        }
         internal void BeginSelection(SelectionShape shape)
         {
             if (closing || selecting || HasSettingsDialog) return;
@@ -482,8 +609,14 @@ namespace ScreenCurtain
             foreach (Zone zone in Zones)
             {
                 Masks[zone].SetClickThrough(PassThrough.IsOn);
-                Masks[zone].SetMaskVisible(Master && zone.Enabled && !selecting && Transfer == null);
+                Masks[zone].SetMaskVisible(Master && zone.Enabled && !selecting && Transfer == null && spotlights.Count == 0 && temporarySpotlights.Count == 0);
             }
+            foreach (var spotlight in spotlights) { if (selecting || Transfer != null || temporarySpotlights.Count > 0) spotlight.Hide(); else if (!spotlight.Visible) spotlight.Show(); }
+            foreach (var spotlight in temporarySpotlights) { if (!spotlight.Visible) spotlight.Show(); }
+            spotlightMenu.Text = traySpotlight.Text = spotlights.Count > 0 && !spotlightFollow && !spotlightCircle ? "关闭矩形固定聚光灯" : "开启矩形固定聚光灯";
+            followSpotlightMenu.Text = trayFollowSpotlight.Text = spotlights.Count > 0 && spotlightFollow && !spotlightCircle ? "关闭矩形跟随聚光灯" : "开启矩形跟随聚光灯";
+            circleSpotlightMenu.Text = trayCircleSpotlight.Text = spotlights.Count > 0 && !spotlightFollow && spotlightCircle ? "关闭圆形固定聚光灯" : "开启圆形固定聚光灯";
+            circleFollowSpotlightMenu.Text = trayCircleFollowSpotlight.Text = spotlights.Count > 0 && spotlightFollow && spotlightCircle ? "关闭圆形跟随聚光灯" : "开启圆形跟随聚光灯";
             UpdateState(); MaintainOverlayOrder();
         }
         internal async Task OpenAppearanceAsync(Zone zone)
@@ -743,7 +876,7 @@ namespace ScreenCurtain
             exportButton.IsEnabled = Zones.Count > 0;
             trayToggle.Text = masterLabel; trayToggle.Enabled = Zones.Count > 0;
             count.Text = "选区  " + Zones.Count;
-            state.Text = warning.Length > 0 ? warning : Zones.Count == 0 ? "就绪 · 点击矩形或多边形按钮开始。" : visible > 0 ? "遮罩已开启 · " + visible + " 个区域显示中" : "遮罩已隐藏 · 已保留 " + Zones.Count + " 个选区";
+            state.Text = warning.Length > 0 ? warning : spotlights.Count > 0 ? (spotlightFollow ? "鼠标跟随聚光灯已开启" : "固定聚光灯已开启") + " · 在更多形状或托盘菜单中关闭" : Zones.Count == 0 ? "就绪 · 点击矩形或多边形按钮开始。" : visible > 0 ? "遮罩已开启 · " + visible + " 个区域显示中" : "遮罩已隐藏 · 已保留 " + Zones.Count + " 个选区";
             tray.Text = "屏幕遮罩 · " + visible + " / " + Zones.Count + " 个区域显示";
         }
         private void LoadSettings()
@@ -786,7 +919,7 @@ namespace ScreenCurtain
             if (closing) return; closing = true;
             copiedStyle = null;
             keeper?.Stop(); resourceCleanup?.Stop(); orderWatcher?.Dispose(); Editor?.Hide(); BorderEditor?.Hide(); Transfer?.Hide(); RenameEditor?.Hide(); if (selection != null && !selection.IsDisposed) selection.Close();
-            SaveSettings(); foreach (MaskForm mask in Masks.Values) mask.Dispose(); Masks.Clear();
+            EndTemporarySpotlight(); StopSpotlight(); SaveSettings(); foreach (MaskForm mask in Masks.Values) mask.Dispose(); Masks.Clear();
             foreach (int id in hotkeys) Native.UnregisterHotKey(Handle, id); hotkeys.Clear();
             tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); DesktopInterop.RemoveWindowSubclass(Handle, subclass, new UIntPtr(1));
         }

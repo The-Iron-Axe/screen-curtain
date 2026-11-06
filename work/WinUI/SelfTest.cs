@@ -75,6 +75,17 @@ namespace ScreenCurtain
                     Points = new List<System.Drawing.Point> { outside, new System.Drawing.Point(outside.X + 159, outside.Y), new System.Drawing.Point(outside.X, outside.Y + 119) } };
                 window.AddZone(rect); window.AddZone(polygon); await Task.Delay(100);
                 check(window.Masks.Values.All(m => m.Visible), "Both rectangle and polygon masks are visible");
+                window.BeginTemporarySpotlight();
+                check(window.TemporarySpotlightCount > 0 && window.Masks.Values.All(m => !m.Visible),
+                    "Temporary spotlight hides normal masks while preserving them");
+                int diameter = window.TemporaryDiameter;
+                window.ResizeTemporarySpotlight(120);
+                check(window.TemporaryDiameter == diameter + 30, "Wheel input enlarges the temporary spotlight");
+                window.ResizeTemporarySpotlight(-120);
+                check(window.TemporaryDiameter == diameter, "Reverse wheel restores the previous spotlight diameter");
+                window.EndTemporarySpotlight();
+                check(window.TemporarySpotlightCount == 0 && window.Masks.Values.All(m => m.Visible),
+                    "Releasing temporary spotlight restores the prior masks without changing their settings");
                 check(Alpha(window.Masks[rect]) == 255 && Alpha(window.Masks[polygon]) == 166, "Native masks retain independent opacity values");
                 IntPtr region = Native.CreateRectRgn(0, 0, 0, 0);
                 try

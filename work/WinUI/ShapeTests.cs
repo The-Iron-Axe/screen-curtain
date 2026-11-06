@@ -40,6 +40,12 @@ namespace ScreenCurtain
             check(invalidSides && PreciseShape.Place(preciseRect, new Point(-100, -50)).Bounds.Location == new Point(-100, -50),
                 "Impossible triangles are rejected and precise shapes place correctly at negative coordinates");
             var screen = new Rectangle(-1920, -1080, 3840, 2160);
+            using (var circular = new SelectionForm(SelectionShape.Ellipse, screen, true))
+            {
+                Drag(circular, new Point(100, 100), new Point(300, 220));
+                check(circular.Result != null && circular.Result.Curve == CurveShape.Ellipse && circular.Result.Bounds.Width == circular.Result.Bounds.Height,
+                    "Circular spotlight selection keeps equal width and height without holding Shift");
+            }
             using (var picker = new SelectionForm(SelectionShape.Rectangle, screen))
             using (var timer = new Forms.Timer { Interval = 100 })
             {

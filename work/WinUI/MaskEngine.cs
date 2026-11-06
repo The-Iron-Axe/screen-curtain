@@ -270,6 +270,7 @@ namespace ScreenCurtain
     {
         private readonly bool polygon;
         private readonly SelectionShape shape;
+        private readonly bool forceCircle;
         private readonly Rectangle desktop;
         private readonly List<Point> points = new List<Point>();
         private readonly Font hintFont = new Font("Microsoft YaHei UI", 12f);
@@ -285,9 +286,10 @@ namespace ScreenCurtain
         internal Point PreviewCursor { get { return SnappedToStart ? points[0] : cursor; } }
 
         internal SelectionForm(bool isPolygon, Rectangle screenBounds) : this(isPolygon ? SelectionShape.Polygon : SelectionShape.Rectangle, screenBounds) { }
-        internal SelectionForm(SelectionShape selectedShape, Rectangle screenBounds)
+        internal SelectionForm(SelectionShape selectedShape, Rectangle screenBounds, bool circle = false)
         {
             shape = selectedShape; polygon = shape == SelectionShape.Polygon;
+            forceCircle = circle && shape == SelectionShape.Ellipse;
             desktop = screenBounds;
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
@@ -372,7 +374,7 @@ namespace ScreenCurtain
             base.OnMouseUp(e);
             if (polygon || !start.HasValue || e.Button != MouseButtons.Left) return;
             Point end = new Point(Math.Max(0, Math.Min(ClientSize.Width - 1, e.X)), Math.Max(0, Math.Min(ClientSize.Height - 1, e.Y)));
-            Zone z = ShapeGeometry.FromDrag(shape, start.Value, end, desktop.Location, (ModifierKeys & Keys.Shift) != 0);
+            Zone z = ShapeGeometry.FromDrag(shape, start.Value, end, desktop.Location, forceCircle || (ModifierKeys & Keys.Shift) != 0);
             Capture = false;
             start = null;
             if (Geometry.Valid(z)) Finish(z);
@@ -446,7 +448,7 @@ namespace ScreenCurtain
                 }
                 if (!polygon && start.HasValue)
                 {
-                    var preview = ShapeGeometry.FromDrag(shape, start.Value, cursor, Point.Empty, (ModifierKeys & Keys.Shift) != 0);
+                    var preview = ShapeGeometry.FromDrag(shape, start.Value, cursor, Point.Empty, forceCircle || (ModifierKeys & Keys.Shift) != 0);
                     Rectangle r = preview.Bounds;
                     using (var path = ShapeGeometry.Path(preview, Point.Empty)) { g.FillPath(fill, path); g.DrawPath(line, path); }
                     TextRenderer.DrawText(g, r.Width + " × " + r.Height + " px", smallFont,
@@ -464,7 +466,7 @@ namespace ScreenCurtain
                 monitor.Y - desktop.Y + 22, width, 78);
             using (Brush b = new SolidBrush(Color.FromArgb(20, 26, 33))) g.FillRectangle(b, hint);
             string title = polygon ? (SnappedToStart ? "已吸附到起点：单击闭合选区" : "多边形：单击添加顶点，靠近起点后单击闭合") : "矩形：按住鼠标左键，拖拽选择区域";
-            if (shape == SelectionShape.Ellipse) title = "椭圆：拖拽选择区域，按住 Shift 画正圆";
+            if (shape == SelectionShape.Ellipse) title = forceCircle ? "圆形聚光灯：拖拽选择亮区大小" : "椭圆：拖拽选择区域，按住 Shift 画正圆";
             if (shape == SelectionShape.Triangle) title = "三角形：拖拽生成，完成后可编辑三个顶点";
             if (shape == SelectionShape.RoundedRectangle) title = "圆角矩形：拖拽选择区域，完成后可编辑圆角大小";
             TextRenderer.DrawText(g, title, hintFont, new Rectangle(hint.X + 18, hint.Y + 12, hint.Width - 36, 28), Color.White);
